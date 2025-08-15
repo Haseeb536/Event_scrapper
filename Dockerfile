@@ -9,6 +9,7 @@ FROM python:3.10-slim
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV TZ=UTC
+ENV CHROME_BIN=/usr/bin/google-chrome
 
 # --------------------
 # Install system dependencies
@@ -18,7 +19,7 @@ RUN apt-get update && \
         wget \
         curl \
         unzip \
-        gnupg \
+        gnupg2 \
         fonts-liberation \
         libnss3 \
         libx11-xcb1 \
@@ -39,18 +40,14 @@ RUN apt-get update && \
         && rm -rf /var/lib/apt/lists/*
 
 # --------------------
-# Install Google Chrome
+# Install Google Chrome (modern method)
 # --------------------
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - && \
-    sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' && \
+RUN wget -q -O /usr/share/keyrings/google-linux-signing-keyring.gpg https://dl.google.com/linux/linux_signing_key.pub && \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-linux-signing-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google.list && \
     apt-get update && \
     apt-get install -y google-chrome-stable && \
     rm -rf /var/lib/apt/lists/*
-
-# --------------------
-# Set Chrome path for undetected-chromedriver
-# --------------------
-ENV CHROME_BIN=/usr/bin/google-chrome
 
 # --------------------
 # Set workdir
