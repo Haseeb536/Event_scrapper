@@ -292,9 +292,9 @@ def scrape_with_proxy(proxy):
 
                 event_url = event_cards[idx].get_attribute("href")
 
-                if event_url in existing_events and all_fields_filled(existing_events[event_url]):
-                    print(f"⏩ Skipping fully scraped: {event_url}")
-                    continue
+                # if event_url in existing_events and all_fields_filled(existing_events[event_url]):
+                #     print(f"⏩ Skipping fully scraped: {event_url}")
+                #     continue
 
                 print(f"📌 Clicking event {idx+1}/{total_events}: {event_url}")
 
@@ -587,24 +587,24 @@ def highlight_duplicates():
 
 # -------------------- RUN --------------------
 while True:
-    # fetch_and_test_proxies()
-    # proxies = load_proxies()
+    fetch_and_test_proxies()
+    proxies = load_proxies()
 
-    # while proxies:
-    #     current_proxy = proxies[0]
-    #     success = scrape_with_proxy(current_proxy)
-    #     if success:
-    #         break
-    #     else:
-    #         proxies.pop(0)
-    #         save_proxies(proxies)
+    while proxies:
+        current_proxy = proxies[0]
+        success = scrape_with_proxy(current_proxy)
+        if success:
+            break
+        else:
+            proxies.pop(0)
+            save_proxies(proxies)
 
-    # extract_emails_from_links()
+    extract_emails_from_links()
     upload_new_data()
 
-    # if not proxies:
-    #     print("🚫 No proxies left.")
+    if not proxies:
+        print("🚫 No proxies left.")
     upload_to_github()
-    # highlight_duplicates()
+    highlight_duplicates()
     # print("⏳ Sleeping for 2 hours...")
     # time.sleep(7200)  # Sleep for 2 hours
