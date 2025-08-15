@@ -136,7 +136,7 @@ def save_proxies(proxies):
             f.write(p + "\n")
 
 
-def init_driver(proxy=None, headless=False):
+def init_driver(proxy=None, headless=True):
     options = uc.ChromeOptions()
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--incognito")
