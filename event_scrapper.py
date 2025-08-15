@@ -10,7 +10,7 @@ required_packages = [
     "selenium",
     "gspread",
     "google-auth",
-    "github"
+    "PyGithub"
 ]
 
 # Install missing packages
@@ -80,7 +80,6 @@ uc.Chrome.__del__ = lambda self: None
 URL = "https://www.djguide.nl/events.p"
 LOGIN_BLOCK_URL = "https://www.djguide.nl/pagecontent.p?pagename=ip_login"
 BASE_DOMAIN = "djguide.nl"
-EMAIL_REGEX = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
 CUSTOM_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36"
 
 # -------------------- FILE PATHS --------------------
@@ -370,20 +369,45 @@ def scrape_with_proxy(proxy):
         return False
 
 # -------------------- PHASE 2: EMAIL SCRAPING --------------------
-def email_already_saved(name, date):
+EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"  # keep your regex
+def ensure_email_csv():
+    """Create the CSV with headers if it does not exist."""
     if not os.path.exists(EMAILS_CSV):
-        return False
+        with open(EMAILS_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "Event Name", "Event Date", "Website link", "Email Address",
+                "Email sent on", "Email already sent before on", "Instructions"
+            ])
+
+def email_already_saved(name, date):
+    ensure_email_csv()  # ensure file exists
     with open(EMAILS_CSV, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            if row["Event Name"] == name and row["Event Date"] == date:
+            if row.get("Event Name", "").strip() == name and row.get("Event Date", "").strip() == date:
                 return True
     return False
 
 def save_email_row(row):
+    ensure_email_csv()  # ensure file exists
     with open(EMAILS_CSV, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(row)
+
+def is_valid_email(email):
+    email = email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return False
+    if not email[-1].isalnum():
+        return False
+    if re.match(r"^[0-9a-f]{20,}@.*", email):  # long hex strings
+        return False
+    if re.match(r".*@\d+\.\d+\.\d+$", email):  # version-like
+        return False
+    if re.search(r"\.(jpg|jpeg|png|gif|svg)$", email):  # image files
+        return False
+    return True
 
 def fetch_emails_bs(url):
     emails = set()
@@ -393,7 +417,7 @@ def fetch_emails_bs(url):
         if resp.status_code != 200:
             return emails
         found = re.findall(EMAIL_REGEX, resp.text)
-        emails.update(e.lower() for e in found)
+        emails.update(e.lower() for e in found if is_valid_email(e))
         print("📧 Emails found")
     except:
         pass
@@ -406,23 +430,25 @@ def fetch_emails_uc(url):
         driver.get(url)
         time.sleep(2)
         found = re.findall(EMAIL_REGEX, driver.page_source)
-        emails.update(e.lower() for e in found)
+        emails.update(e.lower() for e in found if is_valid_email(e))
         driver.quit()
         print("📧 Emails found")
     except:
         pass
-        # print("❌ No emails found")
     return emails
 
 def extract_emails_from_links():
+    ensure_email_csv()  # make sure CSV exists
     with open(EVENTS_CSV, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            name = row["Event Name"]
-            date = row["Event Date"]
+            name = row.get("Event Name", "").strip()
+            date = row.get("Event Date", "").strip()
+            if not name or not date:
+                continue
             if email_already_saved(name, date):
                 continue
-            websites = row["Links"].split(" | ")
+            websites = row.get("Links", "").split(" | ")
             for site in websites:
                 site = site.strip()
                 if not site:
@@ -435,9 +461,11 @@ def extract_emails_from_links():
                     for sub in [site] + [urljoin(site, s) for s in ["/contact", "/info", "/about", "/events", "/tickets"]]:
                         emails.update(fetch_emails_uc(sub))
                 for email in emails:
+                    if not is_valid_email(email):
+                        continue
                     save_email_row([
                         name, date, site, email,
-                        "","", ""
+                        "", "", ""
                     ])
 # -------------------- PHASE 3: uploading data on Gsheet --------------------
 # === CONFIG ===
@@ -509,26 +537,74 @@ def upload_new_data():
     append_to_uploaded_data(new_rows)
     print("💾 Uploaded rows saved to uploaded_data.csv")
     
+def highlight_duplicates():
+    """
+    Highlights duplicate rows in the Google Sheet based on:
+    Event Name, Event Date, Website link, Email Address
+    """
+    sheet = connect_google_sheet()
+    # Get all values from the sheet
+    all_values = sheet.get_all_values()
+
+    if not all_values or len(all_values) < 2:
+        return  # nothing to check
+
+    header = all_values[0]
+    rows = all_values[1:]
+
+    # Find indexes of the 4 key columns
+    try:
+        idx_name = header.index("Event Name")
+        idx_date = header.index("Event Date")
+        idx_website = header.index("Website link")
+        idx_email = header.index("Email Address")
+    except ValueError:
+        print("⚠️ One or more key columns not found in the sheet")
+        return
+
+    seen = {}
+    duplicates = []
+
+    for i, row in enumerate(rows, start=2):  # start=2 because sheet rows start at 1 and row 1 is header
+        key = (row[idx_name], row[idx_date], row[idx_website], row[idx_email])
+        if key in seen:
+            duplicates.append(i)         # current duplicate row
+            duplicates.append(seen[key]) # first occurrence
+        else:
+            seen[key] = i
+        time.sleep(2)
+
+    # Remove duplicates from list
+    duplicates = list(set(duplicates))
+
+    # Apply red background to duplicates
+    for row_number in duplicates:
+        sheet.format(f"A{row_number}:{chr(64+len(header))}{row_number}", {
+            "backgroundColor": {"red": 1, "green": 0.8, "blue": 0.8}
+        })
+
+    print(f"⚠️ Highlighted {len(duplicates)} duplicate rows in red.")
+
 # -------------------- RUN --------------------
-# while True:
-#     fetch_and_test_proxies()
-#     proxies = load_proxies()
+while True:
+    # fetch_and_test_proxies()
+    # proxies = load_proxies()
 
-#     while proxies:
-#         current_proxy = proxies[0]
-#         success = scrape_with_proxy(current_proxy)
-#         if success:
-#             break
-#         else:
-#             proxies.pop(0)
-#             save_proxies(proxies)
+    # while proxies:
+    #     current_proxy = proxies[0]
+    #     success = scrape_with_proxy(current_proxy)
+    #     if success:
+    #         break
+    #     else:
+    #         proxies.pop(0)
+    #         save_proxies(proxies)
 
-#     extract_emails_from_links()
-#     upload_new_data()
+    # extract_emails_from_links()
+    upload_new_data()
 
-#     if not proxies:
-#         print("🚫 No proxies left.")
-
-#     print("⏳ Sleeping for 2 hours...")
-#     time.sleep(7200)  # Sleep for 2 hours
-upload_to_github()
+    # if not proxies:
+    #     print("🚫 No proxies left.")
+    upload_to_github()
+    # highlight_duplicates()
+    # print("⏳ Sleeping for 2 hours...")
+    # time.sleep(7200)  # Sleep for 2 hours
