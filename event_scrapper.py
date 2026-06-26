@@ -44,8 +44,8 @@ def upload_to_github():
     """
     Upload all files in the script directory to the GitHub repo.
     """
-    g = Github("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")
-    repo_name = os.getenv("GITHUB_REPO", "Haseeb536/Event_scrapper")
+    g = Github()
+    repo_name = os.getenv("")
     repo = g.get_repo(repo_name)
 
     for file_name in os.listdir(SCRIPT_DIR):
